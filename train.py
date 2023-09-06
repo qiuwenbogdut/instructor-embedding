@@ -1,7 +1,13 @@
 # This script is based on the modification from https://github.com/huggingface/transformers
+
+# 设置一下只使用GPU0,1,2,3,4,5,6,7
+import os
+os.environ["CUDA_VISIBLE_DEVICES"] = "0,1,2,3,4,5,6,7"
+
 import logging
 import os
 import torch
+torch.set_num_threads(1)
 import random
 import sys
 import json
@@ -9,6 +15,7 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 import datasets
+from datasets import load_from_disk
 import nltk  # Here to have a nice missing dependency error message early on
 
 import transformers
@@ -557,7 +564,7 @@ def main():
             val_dataset = val_dataset.map( 
                 preprocess_function,
                 batched=True,
-                num_proc=data_args.preprocessing_num_workers,
+                num_proc=int(data_args.preprocessing_num_workers),
                 remove_columns=column_names,
                 load_from_cache_file=not data_args.overwrite_cache,
                 desc="Running tokenizer on val dataset",
@@ -567,14 +574,22 @@ def main():
         max_train_samples = min(len(train_dataset), data_args.max_train_samples)
         train_dataset = train_dataset.select(range(max_train_samples))
     with training_args.main_process_first(desc="train dataset map pre-processing"):
-        train_dataset = train_dataset.map(
-            preprocess_function,
-            batched=True,
-            num_proc=data_args.preprocessing_num_workers,
-            remove_columns=column_names,
-            load_from_cache_file=not data_args.overwrite_cache,
-            desc="Running tokenizer on train dataset",
-        )
+
+        cash_file_name = os.path.join(data_args.output_dir, 'train_dataset')
+        if os.path.exists(cash_file_name):
+            train_dataset = load_from_disk(cash_file_name)
+        else:
+            train_dataset = train_dataset.map(
+                preprocess_function,
+                batched=True,
+                num_proc=int(data_args.preprocessing_num_workers),
+                remove_columns=column_names,
+                load_from_cache_file=True,
+                desc="Running tokenizer on train dataset",
+            )
+
+            # 将数据集缓存到磁盘上以加快下次加载速度
+            train_dataset.save_to_disk(cash_file_name)
 
     label_pad_token_id = -100 if data_args.ignore_pad_token_for_loss else tokenizer.pad_token_id
     data_collator = DataCollatorForSeq2Seq(
@@ -584,6 +599,7 @@ def main():
         pad_to_multiple_of=8 if training_args.fp16 else None,
     )
 
+    print('@@@@@@training_args',training_args)
     trainer = InstructorTrainer(
         model=model,
         args=training_args,
@@ -591,7 +607,7 @@ def main():
         eval_dataset=val_dataset,
         tokenizer=tokenizer,
         data_collator=data_collator,
-        compute_metrics=None,
+        compute_metrics=None
     )
 
     checkpoint = None
