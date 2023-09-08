@@ -96,6 +96,7 @@ class InstructorTrainer(Seq2SeqTrainer):
                 num_replicas=self.args.world_size,
                 rank=self.args.process_index,
                 seed=seed,
+                shuffle=False,
             )
 
     def compute_loss(self, model, inputs, return_outputs=False):
@@ -600,6 +601,10 @@ def main():
     )
 
     print('@@@@@@training_args',training_args)
+    training_args.dataloader_num_workers = 50
+    training_args.num_nodes = 1
+    training_args.nprocs_per_node = 8
+    
     trainer = InstructorTrainer(
         model=model,
         args=training_args,
